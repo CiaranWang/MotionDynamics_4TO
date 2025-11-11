@@ -9,7 +9,7 @@
 #include <fstream>
 #include <string>
 
-constexpr double sigma = 1.0;
+constexpr double sigma = 100;
 
 // ----------------------
 // Gaussian blur for density map
@@ -96,14 +96,14 @@ double accumulatedDensityAhead(
             double x_rel = (i + 0.5) * dx - det.cen_x;
             double y_rel = (j + 0.5) * dy - det.cen_y;
             double r = std::sqrt(x_rel * x_rel + y_rel * y_rel);
-            if (r > 5.0) continue;
+            if (r > 300.0) continue;
 
             double theta = std::atan2(y_rel, x_rel) - det.angle;
             while (theta < -kPI) theta += 2 * kPI;
             while (theta > kPI) theta -= 2 * kPI;
             if (theta<-kPI / 4 || theta>kPI / 4) continue;
 
-            double weight = 1.0 - r / 5.0;
+            double weight = 1.0 - r / 150.0;
             acc += weight * density[i][j];
             factor_sum += weight;
         }
