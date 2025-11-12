@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#define MD_VERSION "TO.2.3"
+#define MD_VERSION "TO.2.5"
 
 constexpr double kPI = 3.14159265358979323846;
 
@@ -19,12 +19,16 @@ struct Detection {
     double dir_x;
     double dir_y;
     double angle;
-    double ahead_density; // density ahead
+
+    double ahead_density; // density in front
+    double back_density;  // density behind
     double local_density; // density at current position
+
     double speed;
     double acceleration;
     double angle_change;
     double distance_from_last;
+
     bool interpolated = false;
 };
 

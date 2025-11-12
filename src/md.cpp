@@ -79,17 +79,19 @@ std::vector<std::vector<double>> createDensityMap(
 }
 
 // ----------------------
-// Accumulated density ahead
+// Accumulated density in a direction (angle offset)
 // ----------------------
-double accumulatedDensityAhead(
+double accumulatedDensityDirectional(
     const Detection& det,
     const std::vector<std::vector<double>>& density,
-    double dx, double dy)
+    double dx, double dy,
+    double angle_offset)
 {
     int nx = density.size();
     int ny = density[0].size();
     double acc = 0.0;
     double factor_sum = 0.0;
+    double angle_target = det.angle + angle_offset;
 
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
@@ -98,16 +100,17 @@ double accumulatedDensityAhead(
             double r = std::sqrt(x_rel * x_rel + y_rel * y_rel);
             if (r > 300.0) continue;
 
-            double theta = std::atan2(y_rel, x_rel) - det.angle;
+            double theta = std::atan2(y_rel, x_rel) - angle_target;
             while (theta < -kPI) theta += 2 * kPI;
             while (theta > kPI) theta -= 2 * kPI;
-            if (theta<-kPI / 4 || theta>kPI / 4) continue;
+            if (theta < -kPI / 4 || theta > kPI / 4) continue;
 
             double weight = 1.0 - r / 300.0;
             acc += weight * density[i][j];
             factor_sum += weight;
         }
     }
+
     if (factor_sum > 0) acc /= factor_sum;
     return acc;
 }
@@ -123,17 +126,19 @@ std::vector<Segment> buildSegments(
     std::vector<Segment> segments;
     if (detections.empty()) return segments;
 
-    std::sort(detections.begin(), detections.end(), [](const Detection& a, const Detection& b) { return a.custom_frame < b.custom_frame; });
+    std::sort(detections.begin(), detections.end(),
+        [](const Detection& a, const Detection& b) { return a.custom_frame < b.custom_frame; });
 
     Segment seg;
     Detection* prev = nullptr;
 
     for (size_t i = 0; i < detections.size(); i++) {
         Detection& det = detections[i];
-        // compute local density and ahead_density
+        // compute densities
         det.local_density = density_map[std::min(std::max(int(det.cen_x / dx), 0), int(density_map.size() - 1))]
             [std::min(std::max(int(det.cen_y / dy), 0), int(density_map[0].size() - 1))];
-        det.ahead_density = accumulatedDensityAhead(det, density_map, dx, dy);
+        det.ahead_density = accumulatedDensityDirectional(det, density_map, dx, dy, 0.0);
+        det.back_density = accumulatedDensityDirectional(det, density_map, dx, dy, kPI);
 
         if (!prev) {
             seg.points.push_back(det);
@@ -143,7 +148,6 @@ std::vector<Segment> buildSegments(
 
         long gap = det.custom_frame - prev->custom_frame;
         if (gap > frame_window) {
-            // save previous segment
             segments.push_back(seg);
             seg.points.clear();
             seg.points.push_back(det);
@@ -157,7 +161,6 @@ std::vector<Segment> buildSegments(
             Detection interp;
             interp.ID = det.ID;
             interp.custom_frame = prev->custom_frame + f;
-
             interp.cen_x = prev->cen_x + alpha * (det.cen_x - prev->cen_x);
             interp.cen_y = prev->cen_y + alpha * (det.cen_y - prev->cen_y);
             interp.dir_x = prev->dir_x + alpha * (det.dir_x - prev->dir_x);
@@ -166,15 +169,14 @@ std::vector<Segment> buildSegments(
             if (interp.angle < 0) interp.angle += 2.0 * kPI;
             interp.interpolated = true;
 
-            // densities
             interp.local_density = density_map[std::min(std::max(int(interp.cen_x / dx), 0), int(density_map.size() - 1))]
                 [std::min(std::max(int(interp.cen_y / dy), 0), int(density_map[0].size() - 1))];
-            interp.ahead_density = accumulatedDensityAhead(interp, density_map, dx, dy);
+            interp.ahead_density = accumulatedDensityDirectional(interp, density_map, dx, dy, 0.0);
+            interp.back_density = accumulatedDensityDirectional(interp, density_map, dx, dy, kPI);
 
             seg.points.push_back(interp);
         }
 
-        // distance, speed, angle change
         det.distance_from_last = std::sqrt((det.cen_x - prev->cen_x) * (det.cen_x - prev->cen_x) +
             (det.cen_y - prev->cen_y) * (det.cen_y - prev->cen_y));
         det.speed = det.distance_from_last;
@@ -211,6 +213,42 @@ void smoothVector(std::vector<double>& data, int window = 5) {
 }
 
 // ----------------------
+// Compute track summary
+// ----------------------
+TrackSummary computeSummary(int id, int seg_idx, const Segment& seg)
+{
+    TrackSummary ts{};
+    ts.ID = id;
+    ts.segment_index = seg_idx;
+    ts.n_obs = seg.points.size();
+    if (ts.n_obs == 0) return ts;
+
+    ts.first_frame = seg.points.front().custom_frame;
+    ts.last_frame = seg.points.back().custom_frame;
+    ts.total_distance = 0;
+    ts.mean_speed = 0;
+    ts.mean_angle_change = 0;
+    ts.max_jump = 0;
+    ts.max_gap = 0;
+
+    for (size_t i = 1; i < seg.points.size(); i++) {
+        double d = seg.points[i].distance_from_last;
+        ts.total_distance += d;
+        ts.mean_speed += seg.points[i].speed;
+        ts.mean_angle_change += std::abs(seg.points[i].angle_change);
+        ts.max_jump = std::max(ts.max_jump, d);
+        long gap = seg.points[i].custom_frame - seg.points[i - 1].custom_frame;
+        ts.max_gap = std::max(ts.max_gap, gap);
+    }
+
+    if (ts.n_obs > 1) {
+        ts.mean_speed /= (ts.n_obs - 1);
+        ts.mean_angle_change /= (ts.n_obs - 1);
+    }
+    return ts;
+}
+
+// ----------------------
 // Main engine
 // ----------------------
 int motion_dynamics_run(const std::string& input,
@@ -232,6 +270,9 @@ int motion_dynamics_run(const std::string& input,
 
     std::unordered_map<int, std::vector<Detection>> per_id;
     for (auto& d : detections_all) per_id[d.ID].push_back(d);
+
+    std::ofstream summary_file(output_prefix + "_summary.csv");
+    summary_file << "ID,segment_index,first_frame,last_frame,n_obs,total_distance,mean_speed,max_gap,mean_angle_change,max_jump\n";
 
     for (auto& [id, dets] : per_id) {
         auto segments = buildSegments(dets, frame_window, density_map, dx, dy);
@@ -258,20 +299,31 @@ int motion_dynamics_run(const std::string& input,
 
         std::string filename = output_prefix + "_ID" + std::to_string(id) + ".csv";
         std::ofstream fout(filename);
-        fout << "segment_index,frame,cen_x,cen_y,dir_x,dir_y,angle,ahead_density,local_density,speed,acceleration,angle_change,distance_from_last,interpolated\n";
+        fout << "segment_index,frame,cen_x,cen_y,dir_x,dir_y,angle,"
+            "ahead_density,back_density,local_density,"
+            "speed,acceleration,angle_change,distance_from_last,interpolated\n";
 
         for (size_t s = 0; s < segments.size(); s++) {
             for (auto& det : segments[s].points) {
                 fout << s << "," << det.custom_frame << "," << det.cen_x << "," << det.cen_y
                     << "," << det.dir_x << "," << det.dir_y << "," << det.angle
-                    << "," << det.ahead_density << "," << det.local_density
+                    << "," << det.ahead_density << "," << det.back_density << "," << det.local_density
                     << "," << det.speed << "," << det.acceleration
                     << "," << det.angle_change << "," << det.distance_from_last
                     << "," << (det.interpolated ? "true" : "false") << "\n";
             }
+
+            // compute and record summary
+            TrackSummary ts = computeSummary(id, s, segments[s]);
+            summary_file << ts.ID << "," << ts.segment_index << "," << ts.first_frame << ","
+                << ts.last_frame << "," << ts.n_obs << "," << ts.total_distance << ","
+                << ts.mean_speed << "," << ts.max_gap << "," << ts.mean_angle_change
+                << "," << ts.max_jump << "\n";
         }
+
         std::cout << "Written " << filename << " with " << segments.size() << " segments\n";
     }
 
+    std::cout << "Summary written to " << output_prefix << "_summary.csv\n";
     return 0;
 }
