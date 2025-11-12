@@ -1,4 +1,4 @@
-#include "ReadInput.h"
+﻿#include "ReadInput.h"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -33,7 +33,7 @@ std::vector<Detection> ReadInput_Tzayhri(const std::string& filename) {
     std::ifstream fin(filename);
 
     if (!fin.is_open()) {
-        std::cerr << "Error opening: " << filename << "\n";
+        std::cerr << "❌ Error opening: " << filename << "\n";
         return out;
     }
 
@@ -60,15 +60,30 @@ std::vector<Detection> ReadInput_Tzayhri(const std::string& filename) {
             double blx = std::stod(cols[9]);
             double bly = std::stod(cols[10]);
 
-            d.dir_x = (tlx + trx) - (brx + blx);
-            d.dir_y = (tly + try_) - (bry + bly);
+            // direction vector (top edge midpoint - bottom edge midpoint)
+            double temp_dir_x = (tlx + trx) - (brx + blx);
+            double temp_dir_y = (tly + try_) - (bry + bly);
+
+            double norm = std::sqrt(temp_dir_x * temp_dir_x + temp_dir_y * temp_dir_y);
+            if (norm > 1e-9) {
+                d.dir_x = temp_dir_x / norm;
+                d.dir_y = temp_dir_y / norm;
+            }
+            else {
+                d.dir_x = 0.0;
+                d.dir_y = 0.0;
+            }
 
             d.angle = std::atan2(d.dir_y, d.dir_x);
             if (d.angle < 0) d.angle += 2.0 * kPI;
 
             out.push_back(d);
         }
-        catch (...) { continue; }
+        catch (...) {
+            continue;
+        }
     }
+
+    std::cout << "Parsed " << out.size() << " detections from " << filename << "\n";
     return out;
 }

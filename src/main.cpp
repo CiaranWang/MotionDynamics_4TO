@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
             int ret = std::system(cmd.c_str());
             if (ret == 0) std::cout << "Update & rebuild complete.\n";
             else std::cout << "Update failed.\n";
-            return ret;
+            return ret;        //heya
 #endif
         }
         if (arg == "--smooth") smooth_flag = true; // optional smoothing
