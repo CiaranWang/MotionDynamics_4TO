@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#define MD_VERSION "TO.2.2"
+#define MD_VERSION "TO.2.3"
 
 constexpr double kPI = 3.14159265358979323846;
 
