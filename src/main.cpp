@@ -70,7 +70,11 @@ int main(int argc, char* argv[]) {
 #else
             std::cout << "Updating MotionDynamics...\n";
             std::cout << "Executable directory: " << exec_dir << "\n";
-            std::string cmd = "cd \"" + exec_dir + "\" && git pull && mkdir -p build && cd build && cmake .. && make";
+            std::string cmd =
+                "cd \"" + exec_dir + "/..\" && "
+                "git pull && "
+                "cmake -S . -B build && "
+                "cmake --build build";
             int ret = std::system(cmd.c_str());
             if (ret == 0) std::cout << "Update & rebuild complete.\n";
             else std::cout << "Update failed.\n";
