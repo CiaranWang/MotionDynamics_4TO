@@ -103,7 +103,7 @@ double accumulatedDensityAhead(
             while (theta > kPI) theta -= 2 * kPI;
             if (theta<-kPI / 4 || theta>kPI / 4) continue;
 
-            double weight = 1.0 - r / 150.0;
+            double weight = 1.0 - r / 300.0;
             acc += weight * density[i][j];
             factor_sum += weight;
         }
@@ -223,8 +223,8 @@ int motion_dynamics_run(const std::string& input,
 
     const double pen_width = 2560.0;
     const double pen_height = 1440.0;
-    const int grid_x = 256;
-    const int grid_y = 144;
+    const int grid_x = 2560;
+    const int grid_y = 1440;
     double dx = pen_width / grid_x;
     double dy = pen_height / grid_y;
 
