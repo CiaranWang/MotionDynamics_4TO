@@ -372,6 +372,146 @@ static void interpolate_xy(long frame, const DetRow& a, const DetRow& b, double&
     y = a.y + w * (b.y - a.y);
 }
 
+static bool sample_xy_at_frame(
+    long frame,
+    const std::vector<DetRow>& dets,
+    double& x,
+    double& y)
+{
+    auto it = std::lower_bound(dets.begin(), dets.end(), frame,
+        [](const DetRow& d, long f) {
+            return d.frame < f;
+        });
+
+    if (it != dets.end() && it->frame == frame) {
+        x = it->x;
+        y = it->y;
+        return true;
+    }
+
+    if (it == dets.begin() || it == dets.end()) return false;
+
+    const DetRow& a = *(it - 1);
+    const DetRow& b = *it;
+    if (!(a.frame < frame && frame < b.frame)) return false;
+
+    interpolate_xy(frame, a, b, x, y);
+    return true;
+}
+
+static bool solve_linear_system(std::vector<std::vector<double>>& a, std::vector<double>& b)
+{
+    const int n = static_cast<int>(b.size());
+
+    for (int col = 0; col < n; ++col) {
+        int pivot = col;
+        for (int row = col + 1; row < n; ++row) {
+            if (std::abs(a[row][col]) > std::abs(a[pivot][col])) {
+                pivot = row;
+            }
+        }
+
+        if (std::abs(a[pivot][col]) < 1e-12) return false;
+
+        if (pivot != col) {
+            std::swap(a[pivot], a[col]);
+            std::swap(b[pivot], b[col]);
+        }
+
+        const double div = a[col][col];
+        for (int j = col; j < n; ++j) a[col][j] /= div;
+        b[col] /= div;
+
+        for (int row = 0; row < n; ++row) {
+            if (row == col) continue;
+
+            const double factor = a[row][col];
+            for (int j = col; j < n; ++j) {
+                a[row][j] -= factor * a[col][j];
+            }
+            b[row] -= factor * b[col];
+        }
+    }
+
+    return true;
+}
+
+static bool savitzky_golay_value(
+    const std::vector<double>& offsets,
+    const std::vector<double>& values,
+    int degree,
+    double& value_at_center)
+{
+    const int n = static_cast<int>(values.size());
+    if (n == 0) return false;
+
+    degree = std::min(degree, n - 1);
+    const int m = degree + 1;
+
+    std::vector<std::vector<double>> normal(m, std::vector<double>(m, 0.0));
+    std::vector<double> rhs(m, 0.0);
+
+    for (int i = 0; i < n; ++i) {
+        std::vector<double> powers(m, 1.0);
+        for (int p = 1; p < m; ++p) {
+            powers[p] = powers[p - 1] * offsets[i];
+        }
+
+        for (int r = 0; r < m; ++r) {
+            rhs[r] += powers[r] * values[i];
+            for (int c = 0; c < m; ++c) {
+                normal[r][c] += powers[r] * powers[c];
+            }
+        }
+    }
+
+    if (!solve_linear_system(normal, rhs)) return false;
+
+    value_at_center = rhs[0];
+    return true;
+}
+
+static bool smooth_xy_at_frame(
+    long frame,
+    const std::vector<DetRow>& dets,
+    const TrackInterval& interval,
+    long smooth_window,
+    double& x,
+    double& y)
+{
+    if (smooth_window <= 0) return false;
+
+    const long first = std::max(interval.first, frame - smooth_window);
+    const long last = std::min(interval.last, frame + smooth_window);
+
+    std::vector<double> offsets;
+    std::vector<double> xs;
+    std::vector<double> ys;
+
+    offsets.reserve(static_cast<size_t>(last - first + 1));
+    xs.reserve(offsets.capacity());
+    ys.reserve(offsets.capacity());
+
+    for (long f = first; f <= last; ++f) {
+        double sx = 0.0;
+        double sy = 0.0;
+        if (!sample_xy_at_frame(f, dets, sx, sy)) continue;
+
+        offsets.push_back(static_cast<double>(f - frame));
+        xs.push_back(sx);
+        ys.push_back(sy);
+    }
+
+    double smooth_x = 0.0;
+    double smooth_y = 0.0;
+    if (!savitzky_golay_value(offsets, xs, 2, smooth_x)) return false;
+    if (!savitzky_golay_value(offsets, ys, 2, smooth_y)) return false;
+
+    x = smooth_x;
+    y = smooth_y;
+    return true;
+}
+
 static std::string time_to_string(const VideoTime& t)
 {
     std::ostringstream oss;
@@ -488,20 +628,17 @@ static void compute_traits_for_frame(
             pw.dist = dist;
             pw.within_r4 = (dist <= r4) ? 1 : 0;
 
-            out_pairs_r4.push_back(pw);
-
-            // Trait 5: weight within r5out
+            // Trait 5: pairwise weight within r5out
             if (dist <= r5out) {
-                double w = 0.0;
                 if (dist <= r5in) {
-                    w = 1.0;
+                    pw.trait5_w = 1.0;
                 }
                 else {
-                    w = (r5out - dist) / (r5out - r5in);
+                    pw.trait5_w = (r5out - dist) / (r5out - r5in);
                 }
-                out_traits[i].personal_space_r5 += w;
-                out_traits[j].personal_space_r5 += w;
             }
+
+            out_pairs_r4.push_back(pw);
         }
     }
 
@@ -540,7 +677,6 @@ static void write_hourly_individual(
 
         const double trait1 = acc.sum_trait1 / static_cast<double>(acc.n_frames);
         const double trait3 = acc.sum_trait3 / static_cast<double>(acc.n_frames);
-        const double trait5 = acc.sum_trait5 / static_cast<double>(acc.n_frames);
 
         double trait2 = std::numeric_limits<double>::quiet_NaN();
         if (acc.n_trait2_valid > 0) {
@@ -557,8 +693,7 @@ static void write_hourly_individual(
             << acc.n_frames << ","
             << trait1 << ","
             << trait2 << ","
-            << trait3 << ","
-            << trait5
+            << trait3
             << "\n";
     }
 }
@@ -582,6 +717,7 @@ static void write_hourly_pairs(
 
             const double mean_dist = acc.sum_dist / static_cast<double>(acc.n_frames);
             const double prop_within_r4 = acc.sum_within_r4 / static_cast<double>(acc.n_frames);
+            const double mean_trait5_w = acc.sum_trait5_w / static_cast<double>(acc.n_frames);
 
             fout_pair
                 << pen << ","
@@ -593,14 +729,18 @@ static void write_hourly_pairs(
                 << time_to_string(acc.end_ts) << ","
                 << acc.n_frames << ","
                 << mean_dist << ","
-                << prop_within_r4
+                << prop_within_r4 << ","
+                << mean_trait5_w
                 << "\n";
         }
     }
 }
 
 
-void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_csv)
+void calculate_phenotype(
+    const fs::path& track_summary_csv,
+    const fs::path& out_csv,
+    long smooth_window)
 {
     // 1) Load track summary
     std::vector<TrackSummary> track_info_list = load_tracks(track_summary_csv);
@@ -622,6 +762,10 @@ void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_
 
     std::cout << "Min start frame: " << min_start_frame << "\n";
     std::cout << "Max end frame: " << max_end_frame << "\n";
+    if (smooth_window > 0) {
+        std::cout << "Coordinate smoothing: Savitzky-Golay, polynomial order 2, +/- "
+            << smooth_window << " frames within each track\n";
+    }
 
     // 3) Map ID -> detailed file (each ID has one file)
     std::unordered_map<int, std::string> id_to_file;
@@ -709,10 +853,10 @@ void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_
 
     // Headers
     fout_ind 
-        << "pen,day,hour,ID,start_ts,end_ts,n_frames,trait1,trait2,trait3,trait5\n";
+        << "pen,day,hour,ID,start_ts,end_ts,n_frames,trait1,trait2,trait3\n";
 
     fout_pair
-        << "pen,day,hour,ID1,ID2,start_timestamp,end_timestamp,n_frames,mean_dist_cm,prop_within_r4\n";
+        << "pen,day,hour,ID1,ID2,start_timestamp,end_timestamp,n_frames,mean_dist_cm,prop_within_r4,trait5_w\n";
 
     // 9) frame iteration
     std::vector<FrameObs> frame_rows;
@@ -802,6 +946,11 @@ void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_
                 fo.pen = a.pen;
                 fo.day = a.day;
             }
+
+            if (smooth_window > 0) {
+                smooth_xy_at_frame(i, dets, interval, smooth_window, fo.x, fo.y);
+            }
+
             frame_rows.push_back(fo);
         }
 
@@ -887,7 +1036,6 @@ void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_
             acc.n_frames++;
             acc.sum_trait1 += tr.n_within_r1;
             acc.sum_trait3 += tr.prox_intensity_r3;
-            acc.sum_trait5 += tr.personal_space_r5;
 
             if (!std::isnan(tr.mean_dist_r2)) {
                 acc.sum_trait2 += tr.mean_dist_r2;
@@ -921,6 +1069,7 @@ void calculate_phenotype(const fs::path& track_summary_csv, const fs::path& out_
             acc.n_frames++;
             acc.sum_dist += pw.dist;
             acc.sum_within_r4 += pw.within_r4;
+            acc.sum_trait5_w += pw.trait5_w;
 
             if (!acc.has_time) {
                 acc.start_ts = pw.ts;

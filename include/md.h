@@ -118,8 +118,6 @@ struct TraitsPerInd {
     // 3) proximity intensity score within r3
     double prox_intensity_r3 = 0.0;
 
-    // 5) personal space weighted proximity (within r5_out)
-    double personal_space_r5 = 0.0;
 };
 
 struct GlobalTimePoint {
@@ -139,6 +137,7 @@ struct PairWithin {
     int day = 0;
     double dist = 0.0;
     int within_r4 = 0;
+    double trait5_w = 0.0;
 };
 
 struct HourlyIndAccum {
@@ -150,7 +149,6 @@ struct HourlyIndAccum {
     long n_trait2_valid = 0;
 
     double sum_trait3 = 0.0;
-    double sum_trait5 = 0.0;
 
     VideoTime start_ts{};
     VideoTime end_ts{};
@@ -162,6 +160,7 @@ struct HourlyPairAccum {
 
     double sum_dist = 0.0;
     double sum_within_r4 = 0.0;
+    double sum_trait5_w = 0.0;
 
     VideoTime start_ts{};
     VideoTime end_ts{};
@@ -187,6 +186,7 @@ int get_tracks(const std::filesystem::path& input,
     long min_len);
 
 void calculate_phenotype(const std::filesystem::path& track_summary_csv, 
-    const std::filesystem::path& out_csv);
+    const std::filesystem::path& out_csv,
+    long smooth_window = 0);
 
 #endif

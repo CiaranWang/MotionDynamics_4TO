@@ -1,7 +1,7 @@
 #pragma once
 
-static const char* HELP_TEXT = R"(Usage: ./MotionDynamic_4TO OPTIONS (Linux)
-	Or MotionDynamic_4TO.exe OPTIONS (Windows)
+static const char* HELP_TEXT = R"(Usage: ./MotionDynamics_4TO OPTIONS (Linux)
+	Or MotionDynamics_4TO.exe OPTIONS (Windows)
 
 Segement tracks from ArUco signals.
 
@@ -20,16 +20,17 @@ Options:
   -i /PATH/TO/INPUT_FILE.csv This is the track_summary file you get from --track mode. 
 						and the .csv track file per ID should be in the same folder
   -p /PATH/TO/PARAMETER_FILE.ini
+  --smooth [N]        Smooth coordinates with a Savitzky-Golay filter using +/- N frames within each track.
 
 Linux Example:
   ./MotionDynamics_4TO --track -i coord_paper4.csv
   ./MotionDynamics_4TO --track -i coord_paper4.csv -o ./exp1 --window 250  --min_len 1000
-  ./MotionDynamics_4TO --cal_pheno -i coord_paper4_track_summary.csv -p parameters.ini -o coord_paper4_traits.csv
+  ./MotionDynamics_4TO --cal_pheno -i coord_paper4_track_summary.csv -p parameters.ini -o coord_paper4_traits.csv --smooth 2
  
 Windows Example:
   MotionDynamics_4TO.exe --track -i coord_paper4.csv
   MotionDynamics_4TO.exe --track -i coord_paper4.csv -o ./exp1 --window 250  --min_len 1000
-  MotionDynamics_4TO.exe --cal_pheno -i coord_paper4_track_summary.csv -p parameters.ini -o coord_paper4_traits.csv
+  MotionDynamics_4TO.exe --cal_pheno -i coord_paper4_track_summary.csv -p parameters.ini -o coord_paper4_traits.csv --smooth 2
 
 Report bugs to: zhuoshi.wang@wur.nl
 )";

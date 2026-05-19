@@ -19,7 +19,7 @@
 namespace fs = std::filesystem;
 using namespace std;
 
-static const std::string PROGRAM_VERSION = "T2.2.0";
+static const std::string PROGRAM_VERSION = "T2.3.0";
 
 static void print_version() {
     std::cout << "MotionDynamics Version: " << PROGRAM_VERSION << std::endl;
@@ -30,7 +30,7 @@ static void print_help() {
 }
 
 static fs::path get_root(char* argv0) {
-    fs::path exePath = fs::absolute(argv0);      // /ROOTPATH/build/LIS
+    fs::path exePath = fs::absolute(argv0);      // /ROOTPATH/build/MotionDynamics_4TO
     fs::path exeDir = exePath.parent_path();    // /ROOTPATH/build
     fs::path rootDir = exeDir.parent_path();    // /ROOTPATH
     return rootDir;
@@ -96,7 +96,7 @@ static void run_update(char* argv0)
 
     // Check if .git folder exists
     if (!fs::exists(md_root / ".git") || !fs::is_directory(md_root / ".git")) {
-        std::cout << "Warning: LIS root folder is not a git repository.\n";
+        std::cout << "Warning: MotionDynamics_4TO root folder is not a git repository.\n";
         std::cout << "Clone the repository and try again:\n";
         std::cout << "  git clone https://github.com/CiaranWang/MotionDynamics_4TO.git\n";
         return;
@@ -149,6 +149,7 @@ int main(int argc, char* argv[])
     std::filesystem::path output_dir;
     long frame_window = 200;
     long min_len = 0;
+    long smooth_window = 0;
     bool track_mode = false;
     bool cal_pheno_mode = false;
 
@@ -194,6 +195,19 @@ int main(int argc, char* argv[])
             }
             if (min_len <= 0) {
                 std::cerr << "Error: --min_len must be > 0.\n";
+                return 1;
+            }
+        }
+        else if ((arg == "--smooth") && i + 1 < argc) {
+            try {
+                smooth_window = std::stol(argv[++i]);
+            }
+            catch (const std::exception&) {
+                std::cerr << "Error: --smooth must be an integer.\n";
+                return 1;
+            }
+            if (smooth_window < 0) {
+                std::cerr << "Error: --smooth must be >= 0.\n";
                 return 1;
             }
         }
@@ -263,7 +277,11 @@ int main(int argc, char* argv[])
 
         print_parameters();
 
-        calculate_phenotype(input_file, output_dir);
+        if (smooth_window == 1) {
+            std::cerr << "Warning: --smooth 1 with a second-order Savitzky-Golay filter will have little to no smoothing effect. The program will continue.\n";
+        }
+
+        calculate_phenotype(input_file, output_dir, smooth_window);
     }
     return 0;
 }
